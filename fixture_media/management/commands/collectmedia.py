@@ -8,6 +8,11 @@ from django.core.files.storage import default_storage
 from ._utils import file_patt, file_patt_prefixed
 
 
+# py2/3-agnostic input
+# fixed out of Command method, because "input" is global
+input = getattr(__builtins__, 'raw_input', input)
+
+
 class Command(BaseCommand):
     can_import_settings = True
 
@@ -39,7 +44,7 @@ class Command(BaseCommand):
         fixtures = []
         for fixture_path in app_fixtures:
             try:
-                root, dirs, files = os.walk(fixture_path).next()
+                root, dirs, files = next(os.walk(fixture_path))
                 for file in files:
                     if file.rsplit('.', 1)[-1] in ('json', 'yaml'):
                         fixtures.append((root, os.path.join(root, file)))
@@ -47,7 +52,7 @@ class Command(BaseCommand):
                 pass
 
         if options['interactive']:
-            confirm = raw_input("This will overwrite any existing files. Proceed? ")
+            confirm = input("This will overwrite any existing files. Proceed? ")
             if not confirm.lower().startswith('y'):
                 raise CommandError("Media syncing aborted")
 
@@ -65,7 +70,7 @@ class Command(BaseCommand):
                     fixture_media = os.path.join(root, 'media')
                     fixture_path = os.path.join(fixture_media, fp)
                     if not os.path.exists(fixture_path):
-                        self.stderr.write("File path (%s) found in fixture but not on disk in (%s) \n" % (fp,fixture_path))
+                        self.stderr.write("File path (%s) found in fixture but not on disk in (%s) \n" % (fp, fixture_path))
                         continue
                     final_dest = os.path.join(settings.MEDIA_ROOT, fp)
                     dest_dir = os.path.dirname(final_dest)
