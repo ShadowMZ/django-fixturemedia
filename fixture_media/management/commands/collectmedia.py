@@ -1,7 +1,6 @@
 import os
 
 from django.core.management.base import CommandError, BaseCommand
-
 from django.apps import apps
 from django.core.files.storage import default_storage
 
@@ -16,66 +15,72 @@ input = getattr(__builtins__, 'raw_input', input)
 class Command(BaseCommand):
     can_import_settings = True
 
-    def add_arguments(self, parser):
-        parser.add_argument('--noinput',
-                            action='store_false',
-                            dest='interactive',
-                            default=True,
-                            help="Do NOT prompt the user for input of any kind.")
+    def _handle_fixture(self, root, fixture, media_root):
+        """ Copy media files to MEDIA_ROOT. """
 
-    def handle(self, **options):
-        from django.conf import settings
+        file_paths = []
+        for line in open(fixture).readlines():
+            file_paths.extend(self.pattern.findall(line))
+        if file_paths:
+            for fp in file_paths:
+                fixture_path = os.path.join(root, 'media', fp)
+                if not os.path.exists(fixture_path):
+                    msg = ('File path ({}) found in fixture '
+                           'but not on disk in ({}) \n')
+                    self.stderr.write(msg.format(fp, fixture_path))
+                    continue
+                final_dest = os.path.join(media_root, fp)
+                dest_dir = os.path.dirname(final_dest)
+                if not os.path.exists(dest_dir):
+                    os.makedirs(dest_dir)
+                msg = 'Copied {} to {}\n'
+                self.stdout.write(msg.format(fp, final_dest))
+                with open(fixture_path, 'rb') as f:
+                    default_storage.save(fp, f)
 
-        app_module_paths = []
+    def _autodiscover_fixtures(self, fixture_dirs):
+        """ Autodiscover fixtures """
 
-        for app in apps.get_app_configs():
-            if app.models_module:
-                if hasattr(app.models_module, '__path__'):
-                    # It's a 'models/' subpackage
-                    for path in app.models_module.__path__:
-                        app_module_paths.append(path)
-                else:
-                    # It's a models.py module
-                    app_module_paths.append(app.models_module.__file__)
+        app_module_paths = [app.path for app in apps.get_app_configs()]
+        pathl = lambda path: os.path.join(path, 'fixtures')
 
-        app_fixtures = [os.path.join(os.path.dirname(path), 'fixtures') for path in app_module_paths]
-        app_fixtures += list(settings.FIXTURE_DIRS) + ['']
+        app_fixtures = [pathl(path) for path in app_module_paths]
+        app_fixtures += list(fixture_dirs) + ['']
 
         fixtures = []
         for fixture_path in app_fixtures:
-            try:
-                root, dirs, files = next(os.walk(fixture_path))
+            for root, _, files in os.walk(fixture_path):
                 for file in files:
                     if file.rsplit('.', 1)[-1] in ('json', 'yaml'):
                         fixtures.append((root, os.path.join(root, file)))
-            except StopIteration:
-                pass
+        return fixtures
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--noinput',
+            action='store_false',
+            dest='interactive',
+            default=True,
+            help='Do NOT prompt the user for input of any kind.'
+        )
+
+    def handle(self, **options):
+        """ Handle command invocation """
+
+        from django.conf import settings
+
+        fixtures = self._autodiscover_fixtures(settings.FIXTURE_DIRS)
 
         if options['interactive']:
-            confirm = input("This will overwrite any existing files. Proceed? ")
+            confirm = input('This will overwrite any '
+                            'existing files. Proceed? ')
             if not confirm.lower().startswith('y'):
-                raise CommandError("Media syncing aborted")
+                raise CommandError('Media syncing aborted')
 
         if getattr(settings, 'FIXTURE_MEDIA_REQUIRE_PREFIX', False):
-            pattern = file_patt_prefixed
+            self.pattern = file_patt_prefixed
         else:
-            pattern = file_patt
+            self.pattern = file_patt
 
         for root, fixture in fixtures:
-            file_paths = []
-            for line in open(fixture).readlines():
-                file_paths.extend(pattern.findall(line))
-            if file_paths:
-                for fp in file_paths:
-                    fixture_media = os.path.join(root, 'media')
-                    fixture_path = os.path.join(fixture_media, fp)
-                    if not os.path.exists(fixture_path):
-                        self.stderr.write("File path (%s) found in fixture but not on disk in (%s) \n" % (fp, fixture_path))
-                        continue
-                    final_dest = os.path.join(settings.MEDIA_ROOT, fp)
-                    dest_dir = os.path.dirname(final_dest)
-                    if not os.path.exists(dest_dir):
-                        os.makedirs(dest_dir)
-                    self.stdout.write('Copied %s to %s\n' % (fp, final_dest))
-                    with open(fixture_path, 'rb') as f:
-                        default_storage.save(fp, f)
+            self._handle_fixture(root, fixture, settings.MEDIA_ROOT)
