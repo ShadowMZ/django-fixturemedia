@@ -4,7 +4,6 @@ from django.core.management.base import CommandError, BaseCommand
 
 from django.apps import apps
 from django.core.files.storage import default_storage
-from optparse import make_option
 
 from ._utils import file_patt, file_patt_prefixed
 
@@ -37,13 +36,13 @@ class Command(BaseCommand):
         app_fixtures = [os.path.join(os.path.dirname(path), 'fixtures') for path in app_module_paths]
         app_fixtures += list(settings.FIXTURE_DIRS) + ['']
 
-        json_fixtures = []
+        fixtures = []
         for fixture_path in app_fixtures:
             try:
                 root, dirs, files = os.walk(fixture_path).next()
                 for file in files:
-                    if file.rsplit('.', 1)[-1] == 'json':
-                        json_fixtures.append((root, os.path.join(root, file)))
+                    if file.rsplit('.', 1)[-1] in ('json', 'yaml'):
+                        fixtures.append((root, os.path.join(root, file)))
             except StopIteration:
                 pass
 
@@ -57,8 +56,10 @@ class Command(BaseCommand):
         else:
             pattern = file_patt
 
-        for root, fixture in json_fixtures:
-            file_paths = pattern.findall(open(fixture).read())
+        for root, fixture in fixtures:
+            file_paths = []
+            for line in open(fixture).readlines():
+                file_paths.extend(pattern.findall(line))
             if file_paths:
                 for fp in file_paths:
                     fixture_media = os.path.join(root, 'media')
